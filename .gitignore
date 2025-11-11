@@ -1,0 +1,37 @@
+# Rust
+/target/
+Cargo.lock
+**/*.rs.bk
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Configuration (user-specific)
+bakery-config.toml
+
+# Logs
+*.log
+
+# Output directories
+*.pdb
+*.d
+
+# Backup files
+*.bak
+*.backup
+
+# Temporary files
+tmp/
+temp/
+
+# Test artifacts
+tests/output/
+tests/temp/

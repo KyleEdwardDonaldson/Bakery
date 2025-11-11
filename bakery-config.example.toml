@@ -1,0 +1,69 @@
+# Bakery Configuration Example
+# Copy this to your user config directory and customize as needed
+# Windows: %USERPROFILE%\.bakery\bakery-config.toml
+# Mac/Linux: ~/.bakery/bakery-config.toml
+
+[azure_devops]
+# Azure DevOps organization name
+organization = "your-organization"
+
+# Azure DevOps project name
+project = "YourProject"
+
+# Personal Access Token (PAT) for Azure DevOps API access
+# To create a new PAT:
+# 1. Go to https://dev.azure.com/{organization}/_usersSettings/tokens
+# 2. Click "Create New Token"
+# 3. Give it a name (e.g., "Bakery Scraper")
+# 4. Select scopes: "Work Items" -> "Read" (vso.work)
+# 5. Copy the token and paste it here
+# 6. SECURITY: Treat PATs like passwords!
+pat_token = "your-pat-token-here"
+
+# Azure DevOps REST API version (usually don't need to change this)
+api_version = "7.1"
+
+[storage]
+# Base directory where Bakery stores all data
+# Can be any directory you have write access to
+# Windows example: "C:/DevOpsData"
+# Mac/Linux example: "~/devops-data" or "/home/username/devops-data"
+base_directory = "~/devops-data"
+
+# Subdirectory within base_directory for scraped tickets
+# Tickets will be stored in: {base_directory}/{tickets_subdir}/{ticket_id}/
+tickets_subdir = "Tickets"
+
+# Subdirectory within base_directory for OpenSpec plans
+# Plans will be stored in: {base_directory}/{openspec_subdir}/
+openspec_subdir = "openspec"
+
+# Local baking mode - creates ticket and openspec folders in current working directory
+# When enabled, Bakery will create folders in the directory where the command is run
+# instead of using the base_directory. This is useful for per-project ticket organization.
+# Example: If you run `bakery -t 12345` in /projects/my-project/, folders will be created at:
+#   /projects/my-project/Tickets/12345/   (for ticket data)
+#   /projects/my-project/openspec/        (for OpenSpec plans)
+# When disabled, folders are created in the configured base_directory:
+#   {base_directory}/Tickets/12345/      (for ticket data)
+#   {base_directory}/openspec/           (for OpenSpec plans)
+local_baking = false
+
+[openspec]
+# AI command template for generating OpenSpec plans.
+# Use {prompt} as a placeholder for the generated prompt.
+#
+# Examples:
+# Claude (recommended): ai_command_template = "claude -p \"{prompt}\""
+# Your dev script: ai_command_template = "dev --platform anthropic --non-interactive \"{prompt}\""
+# OpenAI CLI: ai_command_template = "openai api chat.complete --messages \"{prompt}\""
+# Custom AI tool: ai_command_template = "your-ai-tool --prompt \"{prompt}\""
+#
+# The command will execute with {prompt} replaced by the generated OpenSpec prompt.
+# Make sure your chosen AI CLI is accessible via system PATH or provide full paths.
+# Note: Use "claude -p" for direct Claude CLI access, or "claude --non-interactive" for scripted use.
+ai_command_template = "claude -p \"{prompt}\""
+
+# Automatically generate OpenSpec plans after scraping tickets
+# Set to false if you want to generate plans manually
+auto_generate = true
