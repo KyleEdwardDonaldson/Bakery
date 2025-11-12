@@ -75,18 +75,30 @@ impl AzureDevOpsClient {
 
         debug!("Making request to: {}", url);
 
-        let response = self
+        let response = match self
             .client
             .get(&url)
             .header("Authorization", format!("Basic {}", self.encode_pat()))
             .header("Accept", "application/json")
             .send()
-            .await?;
+            .await {
+                Ok(resp) => resp,
+                Err(e) => {
+                    error!("Failed to connect to Azure DevOps API: {}", e);
+                    return Err(anyhow!("Failed to connect to Azure DevOps API: {}. Check your network connection and organization URL.", e));
+                }
+            };
 
-        if !response.status().is_success() {
-            let error_text = response.text().await?;
-            error!("Azure DevOps API error: {}", error_text);
-            return Err(anyhow!("Failed to fetch work item: {}", error_text));
+        let status = response.status();
+        if !status.is_success() {
+            let error_text = response.text().await.unwrap_or_else(|_| "Unable to read error response".to_string());
+            let error_message = if error_text.is_empty() {
+                format!("HTTP {} {} (URL: {})", status.as_u16(), status.canonical_reason().unwrap_or("Unknown Error"), url)
+            } else {
+                format!("HTTP {} - {} (URL: {})", status, error_text, url)
+            };
+            error!("Azure DevOps API error: {}", error_message);
+            return Err(anyhow!("Failed to fetch work item: {}", error_message));
         }
 
         let work_item: AzureWorkItemResponse = response.json().await?;

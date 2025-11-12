@@ -72,25 +72,48 @@ impl OpenSpecManager {
         info!("Full prompt length: {} chars", prompt.len());
         debug!("FULL PROMPT CONTENT:\n{}", prompt);
 
-        // Use heredoc approach - best for long/multi-line prompts with special characters
+        // Use temp file approach - best for long/multi-line prompts with special characters
         let output_result = {
             if cfg!(windows) {
-                // Windows: Use direct claude.cmd execution with stdin
-                Command::new("claude.cmd")
-                    .arg("-p")
-                    .stdin(std::process::Stdio::piped())
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::piped())
-                    .spawn()
-                    .and_then(|mut child| {
-                        use std::io::Write;
-                        if let Some(stdin) = child.stdin.as_mut() {
-                            stdin.write_all(prompt.as_bytes())?;
-                            stdin.flush()?;
-                        }
-                        child.wait_with_output()
-                    })
-                    .map_err(|e| anyhow!("Failed to execute claude.cmd: {}", e))
+                // Windows: Write prompt to temp file and use PowerShell to execute
+                let temp_dir = std::env::temp_dir();
+                let prompt_file = temp_dir.join(format!("bakery_prompt_{}.txt", std::process::id()));
+                let script_file = temp_dir.join(format!("bakery_script_{}.ps1", std::process::id()));
+
+                use std::io::Write;
+
+                // Write the prompt to a temp file
+                std::fs::write(&prompt_file, prompt)
+                    .map_err(|e| anyhow!("Failed to write prompt file: {}", e))?;
+
+                // Create PowerShell script that reads the prompt and passes to claude
+                let ps_script = format!(
+                    r#"$prompt = Get-Content -Path '{}' -Raw
+claude.cmd -p $prompt
+"#,
+                    prompt_file.display().to_string().replace("\\", "\\\\")
+                );
+
+                std::fs::write(&script_file, ps_script)
+                    .map_err(|e| anyhow!("Failed to write PowerShell script: {}", e))?;
+
+                info!("Executing PowerShell script: {}", script_file.display());
+
+                let output = Command::new("powershell.exe")
+                    .args(&[
+                        "-NoProfile",
+                        "-NonInteractive",
+                        "-ExecutionPolicy", "Bypass",
+                        "-File", script_file.to_str().unwrap()
+                    ])
+                    .output()
+                    .map_err(|e| anyhow!("Failed to execute PowerShell script: {}", e))?;
+
+                // Clean up temp files
+                let _ = std::fs::remove_file(&prompt_file);
+                let _ = std::fs::remove_file(&script_file);
+
+                Ok(output)
             } else {
                 // Unix: Use heredoc approach
                 let temp_file_str = format!("/tmp/bakery_prompt_{}.txt", std::process::id());
