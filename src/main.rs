@@ -32,7 +32,7 @@ use openspec::OpenSpecManager;
 #[derive(Parser)]
 #[command(name = "bakery")]
 #[command(about = "Azure DevOps work item scraper for OpenSpec integration")]
-#[command(version = "0.1.2")]
+#[command(version = "0.1.3")]
 #[command(propagate_version = true)]
 struct Cli {
     #[command(subcommand)]
@@ -183,9 +183,16 @@ async fn main() -> Result<()> {
 
     // Generate OpenSpec plan if requested
     if !cli.no_openspec && config.openspec.auto_generate {
-        println!("\n{} {}",
-            "📋".bright_magenta(),
-            "Generating OpenSpec plan...".bright_white()
+        println!("\n{}",
+            "╔══════════════════════════════════════════════════════════════════════════════╗".bright_magenta()
+        );
+        println!("{} {} {}",
+            "║".bright_magenta(),
+            "🤖 AI-Powered OpenSpec Plan Generation".bright_white().bold(),
+            "║".bright_magenta()
+        );
+        println!("{}",
+            "╚══════════════════════════════════════════════════════════════════════════════╝".bright_magenta()
         );
 
         // Ensure OpenSpec is initialized

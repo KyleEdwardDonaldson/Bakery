@@ -4,6 +4,8 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 use tracing::{debug, info, warn, error};
+use indicatif::{ProgressBar, ProgressStyle};
+use std::time::Duration;
 
 pub struct OpenSpecManager {
     base_path: String,
@@ -62,6 +64,17 @@ impl OpenSpecManager {
     pub async fn generate_plan_with_ai(&self, prompt: &str, config: &OpenSpecConfig) -> Result<String> {
         info!("Generating OpenSpec plan using AI command with prompt length: {}", prompt.len());
 
+        // Create an attractive loading spinner
+        let spinner = ProgressBar::new_spinner();
+        spinner.set_style(
+            ProgressStyle::default_spinner()
+                .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+                .template("{spinner:.cyan.bold} {msg}")
+                .unwrap()
+        );
+        spinner.enable_steady_tick(Duration::from_millis(80));
+        spinner.set_message("🤖 Invoking AI to generate OpenSpec plan... (this may take a minute or two)");
+
         // Replace {prompt} placeholder in the command template
         let command_with_prompt = config.ai_command_template.replace("{prompt}", prompt);
 
@@ -75,6 +88,8 @@ impl OpenSpecManager {
         // Use temp file approach - best for long/multi-line prompts with special characters
         let output_result = {
             if cfg!(windows) {
+                spinner.set_message("📝 Preparing AI prompt...");
+
                 // Windows: Write prompt to temp file and use PowerShell to execute
                 let temp_dir = std::env::temp_dir();
                 let prompt_file = temp_dir.join(format!("bakery_prompt_{}.txt", std::process::id()));
@@ -99,6 +114,8 @@ claude.cmd -p $prompt
 
                 info!("Executing PowerShell script: {}", script_file.display());
 
+                spinner.set_message("🧠 AI is thinking... (analyzing work item and generating plan)");
+
                 let output = Command::new("powershell.exe")
                     .args(&[
                         "-NoProfile",
@@ -115,6 +132,8 @@ claude.cmd -p $prompt
 
                 Ok(output)
             } else {
+                spinner.set_message("📝 Preparing AI prompt...");
+
                 // Unix: Use heredoc approach
                 let temp_file_str = format!("/tmp/bakery_prompt_{}.txt", std::process::id());
                 std::fs::create_dir_all("/tmp")
@@ -138,6 +157,8 @@ EOF
                 file.flush().map_err(|e| anyhow!("Failed to flush temp file: {}", e))?;
                 drop(file); // Explicitly drop the file handle to release the lock
 
+                spinner.set_message("🧠 AI is thinking... (analyzing work item and generating plan)");
+
                 Command::new("sh")
                     .arg(&temp_file_str)
                     .output()
@@ -146,6 +167,8 @@ EOF
         };
 
         let output = output_result?;
+
+        spinner.set_message("✨ Processing AI response...");
 
         // Process the output
         let exit_code = output.status.code().unwrap_or(-1);
@@ -160,9 +183,11 @@ EOF
         debug!("Stderr content: {}", stderr);
 
         if output.status.success() {
+            spinner.finish_with_message("✅ AI plan generated successfully!");
             info!("OpenSpec plan generated successfully");
             Ok(stdout.to_string())
         } else {
+            spinner.finish_with_message("❌ AI generation failed");
             error!("AI command failed with exit code {}", exit_code);
             error!("Stderr: {}", stderr);
             error!("Stdout: {}", stdout);
