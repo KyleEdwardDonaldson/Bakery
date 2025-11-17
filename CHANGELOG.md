@@ -5,6 +5,19 @@ All notable changes to Bakery will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2025-01-17
+
+### Added
+- **Binary Alias**: Added `bakery-devops` as a valid alias for the `bakery` command
+  - Both `bakery` and `bakery-devops` now work after installation
+  - Improves discoverability and matches the package name
+  - No functional changes - both binaries are identical
+
+### Changed
+- Updated Cargo.toml to include both binary names
+
+---
+
 ## [0.2.0] - 2025-01-17
 
 ### ✨ Major Features

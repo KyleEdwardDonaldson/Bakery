@@ -1,6 +1,6 @@
 [package]
 name = "bakery-devops"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 authors = ["Kyle Edward Donaldson <kyle@ked.dev>"]
 description = "Azure DevOps work item scraper with OpenSpec integration"
@@ -37,4 +37,8 @@ indicatif = "0.17"
 
 [[bin]]
 name = "bakery"
+path = "src/main.rs"
+
+[[bin]]
+name = "bakery-devops"
 path = "src/main.rs"
