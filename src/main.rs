@@ -32,7 +32,7 @@ use openspec::OpenSpecManager;
 #[derive(Parser)]
 #[command(name = "bakery")]
 #[command(about = "Azure DevOps work item scraper for OpenSpec integration")]
-#[command(version = "0.1.3")]
+#[command(version = "0.1.4")]
 #[command(propagate_version = true)]
 struct Cli {
     #[command(subcommand)]
@@ -115,29 +115,37 @@ async fn main() -> Result<()> {
     // Get PAT token (CLI override, then config, then env, then hardcoded)
     let pat_token = get_pat_token(Some(config.azure_devops.pat_token.clone()))?;
 
-    println!("{} {} {}",
-        "🚀".bright_magenta().bold(),
-        "Starting Bakery".bright_white().bold(),
-        format!("Azure DevOps scraper for ticket #{}", ticket_id).bright_cyan()
-    );
-    println!("{} {} {} {} {}",
-        "📍".bright_blue(),
-        "Organization:".bright_white(),
-        config.azure_devops.organization.bright_green(),
-        "Project:".bright_white(),
-        config.azure_devops.project.bright_green()
-    );
-
-    // Show storage location info
-    if config.storage.local_baking {
-        println!("📁 {} {}",
-            "Storage:".bright_white(),
-            format!("Local baking enabled - folders will be created in current directory").bright_yellow()
+    if cli.verbose {
+        println!("{} {} {}",
+            "🚀".bright_magenta().bold(),
+            "Starting Bakery".bright_white().bold(),
+            format!("Azure DevOps scraper for ticket #{}", ticket_id).bright_cyan()
         );
+        println!("{} {} {} {} {}",
+            "📍".bright_blue(),
+            "Organization:".bright_white(),
+            config.azure_devops.organization.bright_green(),
+            "Project:".bright_white(),
+            config.azure_devops.project.bright_green()
+        );
+
+        // Show storage location info
+        if config.storage.local_baking {
+            println!("📁 {} {}",
+                "Storage:".bright_white(),
+                format!("Local baking enabled - folders will be created in current directory").bright_yellow()
+            );
+        } else {
+            println!("📁 {} {}",
+                "Storage:".bright_white(),
+                config.get_effective_base_directory().bright_cyan()
+            );
+        }
     } else {
-        println!("📁 {} {}",
-            "Storage:".bright_white(),
-            config.get_effective_base_directory().bright_cyan()
+        // Concise output for normal mode
+        println!("{} Fetching work item #{}...",
+            "🔄".bright_cyan(),
+            ticket_id
         );
     }
 
@@ -167,33 +175,45 @@ async fn main() -> Result<()> {
         }
     };
 
-    println!("\n{} {} {}",
-        "✅".bright_green().bold(),
-        "Successfully fetched work item".bright_green(),
-        work_item.title.bright_cyan()
-    );
+    if cli.verbose {
+        println!("\n{} {} {}",
+            "✅".bright_green().bold(),
+            "Successfully fetched work item".bright_green(),
+            work_item.title.bright_cyan()
+        );
+    } else {
+        println!("{} {}",
+            "✓".bright_green(),
+            work_item.title.bright_white()
+        );
+    }
 
     // Save work item to file system
     let ticket_path = filesystem.save_work_item(&work_item).await?;
-    println!("{} {} {}",
-        "💾".bright_blue(),
-        "Work item saved to:".bright_white(),
-        ticket_path.bright_yellow()
-    );
+
+    if cli.verbose {
+        println!("{} {} {}",
+            "💾".bright_blue(),
+            "Work item saved to:".bright_white(),
+            ticket_path.bright_yellow()
+        );
+    }
 
     // Generate OpenSpec plan if requested
     if !cli.no_openspec && config.openspec.auto_generate {
-        println!("\n{}",
-            "╔══════════════════════════════════════════════════════════════════════════════╗".bright_magenta()
-        );
-        println!("{} {} {}",
-            "║".bright_magenta(),
-            "🤖 AI-Powered OpenSpec Plan Generation".bright_white().bold(),
-            "║".bright_magenta()
-        );
-        println!("{}",
-            "╚══════════════════════════════════════════════════════════════════════════════╝".bright_magenta()
-        );
+        if cli.verbose {
+            println!("\n{}",
+                "╔══════════════════════════════════════════════════════════════════════════════╗".bright_magenta()
+            );
+            println!("{} {} {}",
+                "║".bright_magenta(),
+                "🤖 AI-Powered OpenSpec Plan Generation".bright_white().bold(),
+                "║".bright_magenta()
+            );
+            println!("{}",
+                "╚══════════════════════════════════════════════════════════════════════════════╝".bright_magenta()
+            );
+        }
 
         // Ensure OpenSpec is initialized
         openspec_manager.ensure_openspec_initialized().await?;
@@ -202,11 +222,13 @@ async fn main() -> Result<()> {
         let plan_data = filesystem.generate_openspec_plan_data(&work_item);
         let prompt = plan_data.generate_prompt();
 
-        println!("{} {} {}",
-            "✨".bright_cyan(),
-            "Generated prompt".bright_white(),
-            format!("({} chars)", prompt.len()).bright_cyan()
-        );
+        if cli.verbose {
+            println!("{} {} {}",
+                "✨".bright_cyan(),
+                "Generated prompt".bright_white(),
+                format!("({} chars)", prompt.len()).bright_cyan()
+            );
+        }
 
         // Generate plan using AI command
         match openspec_manager.generate_plan_with_ai(&prompt, &config.openspec).await {
@@ -217,27 +239,31 @@ async fn main() -> Result<()> {
                     &work_item.title,
                     &plan_content
                 )?;
-                println!("{} {} {}",
-                    "📝".bright_green(),
-                    "OpenSpec plan saved to:".bright_white(),
-                    plan_path.bright_yellow()
-                );
+
+                if cli.verbose {
+                    println!("{} {} {}",
+                        "📝".bright_green(),
+                        "OpenSpec plan saved to:".bright_white(),
+                        plan_path.bright_yellow()
+                    );
+                }
 
                 // Print summary
-                print_summary(&work_item, &ticket_path, &plan_path);
+                print_summary(&work_item, &ticket_path, &plan_path, cli.verbose);
             }
             Err(_) => {
-                println!("\n{} {}",
-                    "⚠️".bright_yellow(),
-                    "Failed to generate OpenSpec plan".bright_yellow()
+                println!("{} Failed to generate OpenSpec plan",
+                    "⚠️".bright_yellow()
                 );
-                println!("{} {} {}",
-                    "💡".bright_blue(),
-                    "You can generate it manually with:".bright_white(),
-                    format!("cd {} && claude --non-interactive \"{{prompt}}\"",
-                        config.storage.base_directory.bright_cyan()
-                ).bright_cyan()
-                );
+                if cli.verbose {
+                    println!("{} {} {}",
+                        "💡".bright_blue(),
+                        "You can generate it manually with:".bright_white(),
+                        format!("cd {} && claude --non-interactive \"{{prompt}}\"",
+                            config.storage.base_directory.bright_cyan()
+                    ).bright_cyan()
+                    );
+                }
             }
         }
     } else {
@@ -246,7 +272,7 @@ async fn main() -> Result<()> {
         } else {
             "OpenSpec auto-generation is disabled in config"
         };
-        print_summary(&work_item, &ticket_path, reason);
+        print_summary(&work_item, &ticket_path, reason, cli.verbose);
     }
 
     Ok(())
@@ -336,82 +362,98 @@ fn get_pat_token(provided_token: Option<String>) -> Result<String> {
     Ok(hardcoded_token.to_string())
 }
 
-fn print_summary(work_item: &models::WorkItem, ticket_path: &str, plan_path_or_reason: &str) {
-    println!("\n{}",
-        "═".repeat(80).bright_magenta()
-    );
-    println!("{} {} {}",
-        "🎉".bright_green().bold(),
-        "Azure DevOps Ticket Scraped Successfully!".bright_white().bold(),
-        "🎯".bright_cyan()
-    );
-    println!("{}",
-        "═".repeat(80).bright_magenta()
-    );
+fn print_summary(work_item: &models::WorkItem, ticket_path: &str, plan_path_or_reason: &str, verbose: bool) {
+    if verbose {
+        // Detailed summary for verbose mode
+        println!("\n{}",
+            "═".repeat(80).bright_magenta()
+        );
+        println!("{} {} {}",
+            "🎉".bright_green().bold(),
+            "Azure DevOps Ticket Scraped Successfully!".bright_white().bold(),
+            "🎯".bright_cyan()
+        );
+        println!("{}",
+            "═".repeat(80).bright_magenta()
+        );
 
-    println!("\n{} {}",
-        "📋".bright_blue(),
-        "Ticket Details:".bright_white().bold()
-    );
-    println!("   {} {} {} {} {} {}",
-        "🆔".bright_cyan(),
-        "ID:".bright_white(),
-        work_item.id.to_string().bright_green(),
-        "📝".bright_cyan(),
-        "Title:".bright_white(),
-        work_item.title.bright_cyan()
-    );
-    println!("   {} {}",
-        "📊".bright_cyan(),
-        format!("State: {}", work_item.state).bright_white()
-    );
-    println!("   {} {}",
-        "🏷️".bright_cyan(),
-        format!("Type: {}", work_item.work_item_type).bright_green()
-    );
+        println!("\n{} {}",
+            "📋".bright_blue(),
+            "Ticket Details:".bright_white().bold()
+        );
+        println!("   {} {} {} {} {} {}",
+            "🆔".bright_cyan(),
+            "ID:".bright_white(),
+            work_item.id.to_string().bright_green(),
+            "📝".bright_cyan(),
+            "Title:".bright_white(),
+            work_item.title.bright_cyan()
+        );
+        println!("   {} {}",
+            "📊".bright_cyan(),
+            format!("State: {}", work_item.state).bright_white()
+        );
+        println!("   {} {}",
+            "🏷️".bright_cyan(),
+            format!("Type: {}", work_item.work_item_type).bright_green()
+        );
 
-    println!("\n{} {}",
-        "📁".bright_blue(),
-        "Data Location:".bright_white().bold()
-    );
-    println!("   {}", ticket_path.bright_yellow());
+        println!("\n{} {}",
+            "📁".bright_blue(),
+            "Data Location:".bright_white().bold()
+        );
+        println!("   {}", ticket_path.bright_yellow());
 
-    println!("\n{} {}",
-        "📊".bright_blue(),
-        "Content Summary:".bright_white().bold()
-    );
-    println!("   {} {}",
-        "📎".bright_cyan(),
-        format!("Attachments: {}", work_item.attachments.len()).bright_white()
-    );
-    println!("   {} {}",
-        "💬".bright_cyan(),
-        format!("Comments: {}", work_item.comments.len()).bright_white()
-    );
-    println!("   {} {}",
-        "🖼️".bright_cyan(),
-        format!("Images: {}", work_item.images.len()).bright_white()
-    );
-    println!("   {} {}",
-        "✅".bright_cyan(),
-        format!("Acceptance Criteria: {}", work_item.acceptance_criteria.len()).bright_white()
-    );
+        println!("\n{} {}",
+            "📊".bright_blue(),
+            "Content Summary:".bright_white().bold()
+        );
+        println!("   {} {}",
+            "📎".bright_cyan(),
+            format!("Attachments: {}", work_item.attachments.len()).bright_white()
+        );
+        println!("   {} {}",
+            "💬".bright_cyan(),
+            format!("Comments: {}", work_item.comments.len()).bright_white()
+        );
+        println!("   {} {}",
+            "🖼️".bright_cyan(),
+            format!("Images: {}", work_item.images.len()).bright_white()
+        );
+        println!("   {} {}",
+            "✅".bright_cyan(),
+            format!("Acceptance Criteria: {}", work_item.acceptance_criteria.len()).bright_white()
+        );
 
-    println!("\n{} {}",
-        "📝".bright_magenta(),
-        "OpenSpec Plan:".bright_white().bold()
-    );
-    println!("   {}", plan_path_or_reason.bright_yellow());
+        println!("\n{} {}",
+            "📝".bright_magenta(),
+            "OpenSpec Plan:".bright_white().bold()
+        );
+        println!("   {}", plan_path_or_reason.bright_yellow());
 
-    println!("\n{}",
-        "═".repeat(80).bright_magenta()
-    );
-    println!("{} {} {}",
-        "✨".bright_green().bold(),
-        "Ready for development!".bright_white().bold(),
-        "🚀".bright_cyan()
-    );
-    println!("{}",
-        "═".repeat(80).bright_magenta()
-    );
+        println!("\n{}",
+            "═".repeat(80).bright_magenta()
+        );
+        println!("{} {} {}",
+            "✨".bright_green().bold(),
+            "Ready for development!".bright_white().bold(),
+            "🚀".bright_cyan()
+        );
+        println!("{}",
+            "═".repeat(80).bright_magenta()
+        );
+    } else {
+        // Concise summary for normal mode
+        println!("\n{} Work item #{} saved",
+            "✓".bright_green(),
+            work_item.id
+        );
+
+        // Only show plan path if it's actually a path (not a "skipped" message)
+        if !plan_path_or_reason.contains("skipped") && !plan_path_or_reason.contains("disabled") {
+            println!("{} Plan generated",
+                "✓".bright_green()
+            );
+        }
+    }
 }
