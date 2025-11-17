@@ -32,7 +32,7 @@ use openspec::OpenSpecManager;
 #[derive(Parser)]
 #[command(name = "bakery")]
 #[command(about = "Azure DevOps work item scraper for OpenSpec integration")]
-#[command(version = "0.1.1")]
+#[command(version = "0.1.2")]
 #[command(propagate_version = true)]
 struct Cli {
     #[command(subcommand)]

@@ -4,6 +4,9 @@ use reqwest::Client;
 use tracing::{debug, error, info};
 use chrono::{DateTime, Utc};
 
+const MAX_RETRIES: u32 = 3;
+const RETRY_DELAY_MS: u64 = 500;
+
 pub struct AzureDevOpsClient {
     client: Client,
     organization: String,
@@ -75,34 +78,60 @@ impl AzureDevOpsClient {
 
         debug!("Making request to: {}", url);
 
-        let response = match self
-            .client
-            .get(&url)
-            .header("Authorization", format!("Basic {}", self.encode_pat()))
-            .header("Accept", "application/json")
-            .send()
-            .await {
-                Ok(resp) => resp,
-                Err(e) => {
-                    error!("Failed to connect to Azure DevOps API: {}", e);
-                    return Err(anyhow!("Failed to connect to Azure DevOps API: {}. Check your network connection and organization URL.", e));
-                }
-            };
+        for attempt in 1..=MAX_RETRIES {
+            let response = match self
+                .client
+                .get(&url)
+                .header("Authorization", format!("Basic {}", self.encode_pat()))
+                .header("Accept", "application/json")
+                .send()
+                .await {
+                    Ok(resp) => resp,
+                    Err(e) => {
+                        debug!("Attempt {}/{} failed to connect to Azure DevOps API: {}", attempt, MAX_RETRIES, e);
+                        if attempt < MAX_RETRIES {
+                            tokio::time::sleep(tokio::time::Duration::from_millis(RETRY_DELAY_MS * attempt as u64)).await;
+                            continue;
+                        }
+                        error!("Failed to connect to Azure DevOps API after {} attempts: {}", MAX_RETRIES, e);
+                        return Err(anyhow!("Failed to connect to Azure DevOps API: {}. Check your network connection and organization URL.", e));
+                    }
+                };
 
-        let status = response.status();
-        if !status.is_success() {
-            let error_text = response.text().await.unwrap_or_else(|_| "Unable to read error response".to_string());
-            let error_message = if error_text.is_empty() {
-                format!("HTTP {} {} (URL: {})", status.as_u16(), status.canonical_reason().unwrap_or("Unknown Error"), url)
-            } else {
-                format!("HTTP {} - {} (URL: {})", status, error_text, url)
-            };
-            error!("Azure DevOps API error: {}", error_message);
-            return Err(anyhow!("Failed to fetch work item: {}", error_message));
+            let status = response.status();
+            if !status.is_success() {
+                let error_text = response.text().await.unwrap_or_else(|_| "Unable to read error response".to_string());
+                let error_message = if error_text.is_empty() {
+                    format!("HTTP {} {} (URL: {})", status.as_u16(), status.canonical_reason().unwrap_or("Unknown Error"), url)
+                } else {
+                    format!("HTTP {} - {} (URL: {})", status, error_text, url)
+                };
+
+                debug!("Attempt {}/{} got error response: {}", attempt, MAX_RETRIES, error_message);
+                if attempt < MAX_RETRIES {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(RETRY_DELAY_MS * attempt as u64)).await;
+                    continue;
+                }
+
+                error!("Azure DevOps API error after {} attempts: {}", MAX_RETRIES, error_message);
+                return Err(anyhow!("Failed to fetch work item: {}", error_message));
+            }
+
+            match response.json().await {
+                Ok(work_item) => return Ok(work_item),
+                Err(e) => {
+                    debug!("Attempt {}/{} failed to parse JSON: {}", attempt, MAX_RETRIES, e);
+                    if attempt < MAX_RETRIES {
+                        tokio::time::sleep(tokio::time::Duration::from_millis(RETRY_DELAY_MS * attempt as u64)).await;
+                        continue;
+                    }
+                    error!("Failed to parse work item JSON after {} attempts: {}", MAX_RETRIES, e);
+                    return Err(anyhow!("Failed to parse work item JSON: {}", e));
+                }
+            }
         }
 
-        let work_item: AzureWorkItemResponse = response.json().await?;
-        Ok(work_item)
+        unreachable!()
     }
 
     async fn extract_attachments(&self, relations: Vec<AzureRelation>) -> Result<Vec<Attachment>> {
@@ -130,50 +159,79 @@ impl AzureDevOpsClient {
     async fn download_attachment(&self, url: &str, filename: &str) -> Result<Attachment> {
         debug!("Downloading attachment: {} from {}", filename, url);
 
-        let response = self
-            .client
-            .get(url)
-            .header("Authorization", format!("Basic {}", self.encode_pat()))
-            .send()
-            .await?;
+        for attempt in 1..=MAX_RETRIES {
+            let response = match self
+                .client
+                .get(url)
+                .header("Authorization", format!("Basic {}", self.encode_pat()))
+                .send()
+                .await {
+                    Ok(resp) => resp,
+                    Err(e) => {
+                        debug!("Attempt {}/{} failed to download attachment {}: {}", attempt, MAX_RETRIES, filename, e);
+                        if attempt < MAX_RETRIES {
+                            tokio::time::sleep(tokio::time::Duration::from_millis(RETRY_DELAY_MS * attempt as u64)).await;
+                            continue;
+                        }
+                        return Err(anyhow!("Failed to download attachment: {}", e));
+                    }
+                };
 
-        if !response.status().is_success() {
-            return Err(anyhow!("Failed to download attachment: {}", response.status()));
+            if !response.status().is_success() {
+                debug!("Attempt {}/{} got error status {} for attachment {}", attempt, MAX_RETRIES, response.status(), filename);
+                if attempt < MAX_RETRIES {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(RETRY_DELAY_MS * attempt as u64)).await;
+                    continue;
+                }
+                return Err(anyhow!("Failed to download attachment: {}", response.status()));
+            }
+
+            let content_type = response
+                .headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("application/octet-stream")
+                .to_string();
+
+            let size = response
+                .headers()
+                .get("content-length")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(0);
+
+            // Create local file path
+            let local_path = format!("X:/.OTCX/Tickets/temp/attachments/{}", filename);
+
+            // Ensure directory exists
+            std::fs::create_dir_all("X:/.OTCX/Tickets/temp/attachments")?;
+
+            // Download the file content
+            match response.bytes().await {
+                Ok(content) => {
+                    std::fs::write(&local_path, content)?;
+                    return Ok(Attachment {
+                        id: rand::random::<u32>(),
+                        filename: filename.to_string(),
+                        url: url.to_string(),
+                        local_path,
+                        content_type,
+                        size,
+                        created_date: chrono::Utc::now(),
+                    });
+                }
+                Err(e) => {
+                    debug!("Attempt {}/{} failed to read bytes for attachment {}: {}", attempt, MAX_RETRIES, filename, e);
+                    if attempt < MAX_RETRIES {
+                        tokio::time::sleep(tokio::time::Duration::from_millis(RETRY_DELAY_MS * attempt as u64)).await;
+                        continue;
+                    }
+                    return Err(anyhow!("Failed to read attachment bytes: {}", e));
+                }
+            }
         }
 
-        let content_type = response
-            .headers()
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("application/octet-stream")
-            .to_string();
-
-        let size = response
-            .headers()
-            .get("content-length")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(0);
-
-        // Create local file path
-        let local_path = format!("X:/.OTCX/Tickets/temp/attachments/{}", filename);
-
-        // Ensure directory exists
-        std::fs::create_dir_all("X:/.OTCX/Tickets/temp/attachments")?;
-
-        // Download the file content
-        let content = response.bytes().await?;
-        std::fs::write(&local_path, content)?;
-
-        Ok(Attachment {
-            id: rand::random::<u32>(),
-            filename: filename.to_string(),
-            url: url.to_string(),
-            local_path,
-            content_type,
-            size,
-            created_date: chrono::Utc::now(),
-        })
+        unreachable!()
     }
 
     async fn extract_and_download_images(&self, description: &str, work_item_id: u32) -> Result<Vec<ImageReference>> {
@@ -222,21 +280,50 @@ impl AzureDevOpsClient {
     async fn download_image(&self, url: &str, local_path: &str) -> Result<()> {
         debug!("Downloading image: {} to {}", url, local_path);
 
-        let response = self
-            .client
-            .get(url)
-            .header("Authorization", format!("Basic {}", self.encode_pat()))
-            .send()
-            .await?;
+        for attempt in 1..=MAX_RETRIES {
+            let response = match self
+                .client
+                .get(url)
+                .header("Authorization", format!("Basic {}", self.encode_pat()))
+                .send()
+                .await {
+                    Ok(resp) => resp,
+                    Err(e) => {
+                        debug!("Attempt {}/{} failed to download image from {}: {}", attempt, MAX_RETRIES, url, e);
+                        if attempt < MAX_RETRIES {
+                            tokio::time::sleep(tokio::time::Duration::from_millis(RETRY_DELAY_MS * attempt as u64)).await;
+                            continue;
+                        }
+                        return Err(anyhow!("Failed to download image: {}", e));
+                    }
+                };
 
-        if !response.status().is_success() {
-            return Err(anyhow!("Failed to download image: {}", response.status()));
+            if !response.status().is_success() {
+                debug!("Attempt {}/{} got error status {} for image {}", attempt, MAX_RETRIES, response.status(), url);
+                if attempt < MAX_RETRIES {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(RETRY_DELAY_MS * attempt as u64)).await;
+                    continue;
+                }
+                return Err(anyhow!("Failed to download image: {}", response.status()));
+            }
+
+            match response.bytes().await {
+                Ok(content) => {
+                    std::fs::write(local_path, content)?;
+                    return Ok(());
+                }
+                Err(e) => {
+                    debug!("Attempt {}/{} failed to read bytes for image {}: {}", attempt, MAX_RETRIES, url, e);
+                    if attempt < MAX_RETRIES {
+                        tokio::time::sleep(tokio::time::Duration::from_millis(RETRY_DELAY_MS * attempt as u64)).await;
+                        continue;
+                    }
+                    return Err(anyhow!("Failed to read image bytes: {}", e));
+                }
+            }
         }
 
-        let content = response.bytes().await?;
-        std::fs::write(local_path, content)?;
-
-        Ok(())
+        unreachable!()
     }
 
     async fn get_work_item_comments(&self, work_item_id: u32) -> Result<Vec<Comment>> {
@@ -247,55 +334,87 @@ impl AzureDevOpsClient {
             self.organization, work_item_id
         );
 
-        let response = self
-            .client
-            .get(&url)
-            .header("Authorization", format!("Basic {}", self.encode_pat()))
-            .header("Accept", "application/json")
-            .send()
-            .await?;
+        for attempt in 1..=MAX_RETRIES {
+            let response = match self
+                .client
+                .get(&url)
+                .header("Authorization", format!("Basic {}", self.encode_pat()))
+                .header("Accept", "application/json")
+                .send()
+                .await {
+                    Ok(resp) => resp,
+                    Err(e) => {
+                        debug!("Attempt {}/{} failed to fetch comments for work item {}: {}", attempt, MAX_RETRIES, work_item_id, e);
+                        if attempt < MAX_RETRIES {
+                            tokio::time::sleep(tokio::time::Duration::from_millis(RETRY_DELAY_MS * attempt as u64)).await;
+                            continue;
+                        }
+                        // Comments might not be available for all work items
+                        debug!("No comments available for work item {} or insufficient permissions", work_item_id);
+                        return Ok(Vec::new());
+                    }
+                };
 
-        if !response.status().is_success() {
-            // Comments might not be available for all work items
-            debug!("No comments available for work item {} or insufficient permissions", work_item_id);
-            return Ok(Vec::new());
+            if !response.status().is_success() {
+                debug!("Attempt {}/{} got error status {} for comments", attempt, MAX_RETRIES, response.status());
+                if attempt < MAX_RETRIES {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(RETRY_DELAY_MS * attempt as u64)).await;
+                    continue;
+                }
+                // Comments might not be available for all work items
+                debug!("No comments available for work item {} or insufficient permissions", work_item_id);
+                return Ok(Vec::new());
+            }
+
+            match response.json::<AzureCommentsResponse>().await {
+                Ok(comments_response) => {
+                    let mut comments = Vec::new();
+
+                    for azure_comment in comments_response.value {
+                        let created_date = azure_comment.created_date
+                            .parse::<DateTime<Utc>>()
+                            .unwrap_or_else(|_| Utc::now());
+
+                        let updated_date = azure_comment.updated_date
+                            .and_then(|date| date.parse::<DateTime<Utc>>().ok());
+
+                        let author = User {
+                            display_name: azure_comment.author.displayName.clone(),
+                            email: azure_comment.author.url.clone(), // This might need extraction
+                            url: azure_comment.author.url,
+                        };
+
+                        // Extract images from comment text
+                        let comment_images = self.extract_and_download_images_from_text(
+                            &azure_comment.text,
+                            work_item_id,
+                            &format!("comment_{}", azure_comment.id)
+                        ).await.unwrap_or_default();
+
+                        comments.push(Comment {
+                            id: azure_comment.id,
+                            author,
+                            created_date,
+                            updated_date,
+                            text: azure_comment.text,
+                            images: comment_images,
+                        });
+                    }
+
+                    return Ok(comments);
+                }
+                Err(e) => {
+                    debug!("Attempt {}/{} failed to parse comments JSON: {}", attempt, MAX_RETRIES, e);
+                    if attempt < MAX_RETRIES {
+                        tokio::time::sleep(tokio::time::Duration::from_millis(RETRY_DELAY_MS * attempt as u64)).await;
+                        continue;
+                    }
+                    return Ok(Vec::new());
+                }
+            }
         }
 
-        let comments_response: AzureCommentsResponse = response.json().await?;
-        let mut comments = Vec::new();
-
-        for azure_comment in comments_response.value {
-            let created_date = azure_comment.created_date
-                .parse::<DateTime<Utc>>()
-                .unwrap_or_else(|_| Utc::now());
-
-            let updated_date = azure_comment.updated_date
-                .and_then(|date| date.parse::<DateTime<Utc>>().ok());
-
-            let author = User {
-                display_name: azure_comment.author.displayName.clone(),
-                email: azure_comment.author.url.clone(), // This might need extraction
-                url: azure_comment.author.url,
-            };
-
-            // Extract images from comment text
-            let comment_images = self.extract_and_download_images_from_text(
-                &azure_comment.text,
-                work_item_id,
-                &format!("comment_{}", azure_comment.id)
-            ).await.unwrap_or_default();
-
-            comments.push(Comment {
-                id: azure_comment.id,
-                author,
-                created_date,
-                updated_date,
-                text: azure_comment.text,
-                images: comment_images,
-            });
-        }
-
-        Ok(comments)
+        unreachable!()
     }
 
     async fn extract_and_download_images_from_text(
