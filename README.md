@@ -2,17 +2,20 @@
 
 > A beautiful Azure DevOps work item scraper with AI-powered OpenSpec integration.
 
-Bakery is a professional CLI tool that scrapes Azure DevOps work items and generates comprehensive OpenSpec implementation plans using AI. Features beautiful terminal output, flexible configuration, and both centralized and local storage modes.
+Bakery is a professional CLI tool that scrapes Azure DevOps work items and generates comprehensive OpenSpec implementation plans using AI. Features beautiful terminal output, flexible configuration, and seamless OpenSpec CLI integration with automatic validation.
 
 ## ✨ Features
 
-- 🚀 **Beautiful Terminal Output** - Colorful, emoji-enhanced user experience
+- 🚀 **Clean Terminal Output** - Minimal, professional interface with verbose mode available
 - 🔧 **Flexible Configuration** - User-friendly TOML configuration system
 - 📁 **Smart Storage Options** - Centralized or local project-based storage
 - 🤖 **AI-Powered OpenSpec Integration** - Comprehensive implementation plan generation
+- ✅ **Automatic Validation** - Built-in OpenSpec CLI validation and formatting
+- 📋 **Proper OpenSpec Structure** - Creates changes/proposal.md, tasks.md, and specs/
 - 🎯 **Complete Azure DevOps Integration** - Full work item content extraction
+- 🔄 **Retry Logic** - Automatic retries for flaky Azure DevOps API calls
+- 🖨️ **Machine-Readable Output** - `--print` flag for LLM/automation integration
 - ⚙️ **Professional CLI** - Built with Rust for performance and reliability
-- 📋 **OpenSpec Methodology** - Proper three-stage workflow integration
 
 ## 🚀 Quick Start
 
@@ -22,7 +25,7 @@ Bakery is a professional CLI tool that scrapes Azure DevOps work items and gener
 # Install from crates.io
 cargo install bakery-devops
 
-# The binary will be available as `bakery` (not `bakery-devops`)
+# The binary will be available as `bakery`
 bakery --help
 
 # Or build locally
@@ -34,14 +37,17 @@ cargo build --release
 ### Basic Usage
 
 ```bash
-# Scrape a work item and generate OpenSpec plan
+# Scrape a work item and generate OpenSpec change proposal
 bakery -t 12345
+
+# Machine-readable output for LLM integration
+bakery -t 12345 --print
+
+# Verbose mode with detailed logging
+bakery -t 12345 --verbose
 
 # Open configuration file
 bakery config
-
-# Get help
-bakery --help
 ```
 
 ### 📦 Package vs Binary Name
@@ -50,43 +56,41 @@ bakery --help
 - **Package name on crates.io:** `bakery-devops`
 - **Binary name after installation:** `bakery`
 
-This means you install with `cargo install bakery-devops` but run commands with `bakery`.
-
 ```bash
 # ✅ Correct: Install the package
 cargo install bakery-devops
 
-# ✅ Correct: Use the binary after installation
+# ✅ Correct: Use the binary
 bakery --help
 
-# ❌ Incorrect: (package name is not the binary name)
+# ❌ Incorrect: package name ≠ binary name
 bakery-devops --help
 ```
 
 ## ⚠️ Prerequisites
 
-### Required for Basic Usage:
+### Required:
 - ✅ Azure DevOps Personal Access Token (PAT)
 - ✅ Network access to `dev.azure.com`
 
-### Optional for OpenSpec Integration:
-- 🤖 **AI CLI Tool** (any of the following):
-  - [Claude CLI](https://claude.ai/cli) - Recommended
-  - OpenAI CLI
-  - Custom AI tools that accept prompts via command line
+### Optional for Full OpenSpec Integration:
+- 🤖 **Claude CLI** or compatible AI tool - For plan generation
+- 📋 **OpenSpec CLI** (`npm install -g openspec`) - For validation and workflow
 
-**If you don't have an AI CLI configured**, Bakery will still scrape work items perfectly:
+**If you don't have OpenSpec CLI**, Bakery will still:
+- ✅ Scrape work items perfectly
+- ✅ Generate AI plans (if AI configured)
+- ⚠️ Skip validation (you'll see a warning)
 
-1. **Disable OpenSpec generation:**
-   ```bash
-   bakery -t 12345 --no-openspec
-   ```
+**If you don't have AI CLI configured**:
+```bash
+# Disable OpenSpec generation
+bakery -t 12345 --no-openspec
 
-2. **Disable in configuration:**
-   ```toml
-   [openspec]
-   auto_generate = false
-   ```
+# Or disable in config
+[openspec]
+auto_generate = false
+```
 
 ## 📋 Configuration
 
@@ -94,45 +98,25 @@ Bakery automatically creates a configuration file at:
 - **Windows**: `%USERPROFILE%\.bakery\bakery-config.toml`
 - **Mac/Linux**: `~/.bakery/bakery-config.toml`
 
-Run `bakery config` to open the configuration file in your default editor.
+Run `bakery config` to open and edit the configuration.
 
 ### Configuration Example
 
 ```toml
 [azure_devops]
-# Azure DevOps organization name
 organization = "your-organization"
-
-# Azure DevOps project name
 project = "YourProject"
-
-# Personal Access Token (PAT) for Azure DevOps API access
 pat_token = "your-pat-token-here"
-
-# Azure DevOps REST API version (usually don't need to change this)
 api_version = "7.1"
 
 [storage]
-# Base directory where Bakery stores all data
-# Windows example: "C:/DevOpsData"
-# Mac/Linux example: "~/devops-data"
 base_directory = "~/devops-data"
-
-# Subdirectory for scraped tickets
 tickets_subdir = "Tickets"
-
-# Subdirectory for OpenSpec plans
 openspec_subdir = "openspec"
-
-# Local baking mode - creates folders in current working directory
-local_baking = false
+local_baking = false  # Set true to use current directory
 
 [openspec]
-# AI command template for generating OpenSpec plans
-# Use {prompt} as a placeholder for the generated prompt
-ai_command_template = "claude -p \"{prompt}\""
-
-# Automatically generate OpenSpec plans after scraping tickets
+ai_command_template = "claude --print \"{prompt}\""
 auto_generate = true
 ```
 
@@ -140,105 +124,142 @@ auto_generate = true
 
 1. **Create a Personal Access Token (PAT):**
    - Go to https://dev.azure.com/{organization}/_usersSettings/tokens
-   - Click "Create New Token"
-   - Give it a name (e.g., "Bakery Scraper")
-   - Select scopes: "Work Items" → "Read" (vso.work)
-   - Copy the token to your configuration
+   - Click "New Token"
+   - Name: "Bakery Scraper"
+   - Scope: Work Items → Read (vso.work)
+   - Copy token to configuration
 
 2. **Configure Bakery:**
-   - Run `bakery config` to open configuration
-   - Update `organization`, `project`, and `pat_token`
-   - Set your preferred `base_directory`
+   ```bash
+   bakery config
+   # Update organization, project, pat_token
+   ```
 
-## 📁 Storage Modes
+## 📁 OpenSpec Directory Structure
 
-### Centralized Storage (Default)
+Bakery creates proper OpenSpec change proposals:
+
 ```
 {base_directory}/
 ├── Tickets/
-│   ├── 12345/
-│   │   ├── work_item.json
-│   │   ├── attachments/
-│   │   └── images/
-│   └── 12346/
+│   └── 12345/
+│       ├── work_item.json
+│       ├── attachments/
+│       └── images/
 └── openspec/
-    ├── 12345-concise-title.md
-    └── 12346-another-title.md
+    ├── AGENTS.md         # Created by openspec init
+    ├── project.md        # Project context
+    ├── specs/            # Current specifications
+    └── changes/          # Change proposals
+        └── add-12345-feature-name/
+            ├── proposal.md    # Why, What, Impact
+            ├── tasks.md       # Implementation checklist
+            └── specs/         # Spec deltas
+                └── feature/
+                    └── spec.md  # ADDED/MODIFIED/REMOVED Requirements
 ```
 
 ### Local Baking Mode
-Set `local_baking = true` to create folders in your current working directory:
-```
-current-project/
-├── Tickets/
-│   └── 12345/
-└── openspec/
-```
+Set `local_baking = true` to create folders in current working directory.
 
 ## 🤖 AI Integration
 
-Bakery supports any AI CLI that accepts prompts as command line arguments:
+Bakery uses stdin piping for maximum compatibility with AI CLIs:
 
-### Claude (Recommended)
+### Claude CLI (Recommended)
 ```bash
-claude -p "{prompt}"
-```
-
-### OpenAI CLI
-```bash
-openai api chat.complete --messages "{prompt}"
+# In config:
+ai_command_template = "claude --print \"{prompt}\""
 ```
 
 ### Custom AI Tools
+Any tool that accepts stdin or command-line prompts:
 ```bash
-your-ai-tool --prompt "{prompt}"
+ai_command_template = "your-ai-tool --input \"{prompt}\""
 ```
-
-Configure your preferred AI tool in the `ai_command_template` setting.
 
 ## 📋 OpenSpec Integration
 
-Bakery generates comprehensive OpenSpec implementation plans that follow the proper three-stage workflow:
+Bakery generates **proper OpenSpec change proposals** following the official methodology:
 
-### Generated Plans Include:
-- **Change Analysis**: Scope identification and directory structure planning
-- **Proposal Structure**: Complete proposal.md with Why, What Changes, and Impact
-- **Delta Specifications**: Proper ADDED/MODIFIED/REMOVED Requirements with scenarios
-- **Implementation Tasks**: Detailed tasks.md with analysis, implementation, and verification
-- **Design Documentation**: design.md when needed for complex changes
-- **Three-Stage Workflow**: Creating Changes → Implementing Changes → Archiving Changes
-- **Quality Gates**: Validation, testing, and approval requirements
+### What Gets Created:
 
-### OpenSpec Features:
-- ✅ Proper methodology integration from OpenSpec AGENTS.md
-- ✅ Scenario-driven requirements with WHEN/THEN format
-- ✅ Delta operations (ADDED/MODIFIED/REMOVED/RENAMED)
-- ✅ Implementation task breakdowns
-- ✅ Testing strategies and validation steps
-- ✅ Quality gates and completion criteria
+#### 1. **proposal.md**
+```markdown
+# Change: Feature Name
 
-## 🎯 Features
+## Why
+[Problem/opportunity explanation]
 
-### Work Item Scraping
-- ✅ Full work item details (title, description, state, type)
-- ✅ Acceptance criteria extraction
-- ✅ Comments and attachments
-- ✅ Embedded images and media
-- ✅ Related work items
-- ✅ HTML content cleaning and formatting
+## What Changes
+- [Bullet list of changes]
+- [Breaking changes marked]
 
-### OpenSpec Integration
-- ✅ Comprehensive plan generation (130+ lines typical)
-- ✅ Proper OpenSpec methodology
-- ✅ AI-powered analysis and task creation
-- ✅ Integration with multiple AI platforms
-- ✅ Customizable filename formats
+## Impact
+- Affected specs: [capabilities]
+- Affected code: [files/systems]
+```
 
-### Terminal Experience
-- 🎨 Beautiful colored output
-- 📊 Detailed progress information
-- ✅ Success/error messaging
-- 📁 Storage location indicators
+#### 2. **tasks.md**
+```markdown
+## 1. Analysis and Planning
+- [ ] 1.1 Review existing specs
+- [ ] 1.2 Check for conflicts
+
+## 2. Implementation
+- [ ] 2.1 Implement feature
+- [ ] 2.2 Write tests
+- [ ] 2.3 Update docs
+
+## 3. Verification
+- [ ] 3.1 Run openspec validate --strict
+- [ ] 3.2 Test scenarios
+- [ ] 3.3 Get approval
+```
+
+#### 3. **specs/{capability}/spec.md** (if requirements included)
+```markdown
+## ADDED Requirements
+### Requirement: Feature Name
+The system SHALL provide...
+
+#### Scenario: Success Case
+- **WHEN** user performs action
+- **THEN** expected result
+
+## MODIFIED Requirements
+[Full updated requirements]
+
+## REMOVED Requirements
+[Deprecated features]
+```
+
+### Automatic Validation
+
+Bakery automatically runs `openspec validate --strict` on generated changes and reports results:
+- ✅ **Passed**: Change is properly formatted
+- ⚠️ **Issues**: Shows validation command to fix errors
+- ⚙️ **CLI not found**: Continues without validation
+
+### OpenSpec Commands
+
+After generating a change:
+```bash
+# List all changes
+openspec list
+
+# View interactive dashboard
+openspec view
+
+# Show change details
+openspec show add-12345-feature-name
+
+# Validate change
+openspec validate add-12345-feature-name --strict
+
+# After implementation, archive the change
+openspec archive add-12345-feature-name
+```
 
 ## 📖 Command Line Options
 
@@ -247,53 +268,99 @@ bakery [OPTIONS] [COMMAND]
 
 Commands:
   config  Open Bakery configuration file
-  help    Print this message or the help of the given subcommands
 
 Options:
-  -t, --ticket-id <TICKET_ID>            The Azure DevOps work item ID to scrape
-      --organization <ORGANIZATION>      Azure DevOps organization name (overrides config)
-      --project <PROJECT>                Azure DevOps project name (overrides config)
-      --pat-token <PAT_TOKEN>            Personal Access Token for authentication (overrides config)
-      --base-directory <BASE_DIRECTORY>  Base directory for storing tickets (overrides config)
+  -t, --ticket-id <TICKET_ID>            Azure DevOps work item ID to scrape
+      --organization <ORGANIZATION>      Override config organization
+      --project <PROJECT>                Override config project
+      --pat-token <PAT_TOKEN>            Override config PAT token
+      --base-directory <BASE_DIRECTORY>  Override config base directory
       --no-openspec                      Skip OpenSpec plan generation
   -v, --verbose                          Enable verbose logging
+  -p, --print                            Machine-readable output for LLMs
   -h, --help                             Print help
   -V, --version                          Print version
 ```
 
 ## 🔍 Examples
 
-### Basic Scraping
+### Basic Usage
 ```bash
-# Scrape work item with default settings
+# Clean output (default)
 bakery -t 12345
 
-# Scrape with verbose logging
+# Verbose output with all details
 bakery -t 12345 --verbose
 
 # Skip OpenSpec generation
 bakery -t 12345 --no-openspec
 ```
 
+### Machine-Readable Output
+```bash
+# Perfect for LLM/automation integration
+bakery -t 12345 --print
+
+# Output:
+# --- BAKERY OUTPUT ---
+# work_item_id: 12345
+# work_item_title: Feature Name
+# ticket_path: /path/to/Tickets/12345
+# change_path: /path/to/openspec/changes/add-12345-feature-name
+# status: success
+```
+
 ### Override Configuration
 ```bash
-# Use different organization
+# Different organization
 bakery -t 12345 --organization my-org
 
-# Use different project
-bakery -t 12345 --project MyProject
-
-# Use custom storage directory
+# Custom storage location
 bakery -t 12345 --base-directory ./my-tickets
 ```
 
-### Local Baking Mode
-```bash
-# Enable local baking in config, then run:
-cd /path/to/your/project
-bakery -t 12345
-# Creates folders in current directory
+## 🎯 Output Modes
+
+### Default Mode (Clean & Concise)
 ```
+🔄 Fetching work item #12345...
+✓ Feature implementation
+
+┌─────────────────────────────────────────────────────┐
+│  🤖 AI Generating OpenSpec Plan...             │
+└─────────────────────────────────────────────────────┘
+✓ Validation passed
+✓ 3 new requirement(s)
+📁 /path/to/openspec/changes/add-12345-feature-name
+
+✓ Complete
+
+Next: openspec list  or openspec view
+```
+
+### Verbose Mode (`-v`)
+- Detailed progress messages
+- File paths for all operations
+- Full summary with statistics
+- Debug logging information
+
+### Print Mode (`-p`)
+- Machine-readable key-value output
+- No decorations or progress indicators
+- Perfect for parsing by LLMs or scripts
+
+## 🔄 Reliability Features
+
+### Automatic Retry Logic
+- Azure DevOps API calls retry up to 3 times
+- Exponential backoff (500ms base delay)
+- Failures only shown in verbose/debug mode
+- Handles flaky network connections gracefully
+
+### Error Handling
+- Clear error messages for common issues
+- Graceful degradation (works without AI/OpenSpec CLI)
+- Detailed logging in verbose mode
 
 ## 🔧 Development
 
@@ -309,29 +376,22 @@ cargo build --release
 cargo test
 ```
 
-### Development Setup
+### Development Run
 ```bash
-# Install development dependencies
-cargo build
-
-# Run with debug output
 cargo run -- -t 12345 --verbose
 ```
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
-
-### Development Guidelines
-- Follow Rust best practices and conventions
-- Add tests for new features
-- Update documentation as needed
-- Ensure the code builds with `cargo build`
-- Run tests with `cargo test`
+Contributions welcome! Please:
+1. Open an issue for major changes
+2. Follow Rust best practices
+3. Add tests for new features
+4. Update documentation
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License - see [LICENSE](LICENSE) file for details.
 
 ## 👨‍💻 Author
 
@@ -341,31 +401,31 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🙏 Acknowledgments
 
-### OpenSpec Integration
-This tool integrates methodology and concepts from **OpenSpec**, a comprehensive specification-driven development framework. The OpenSpec workflow provides the structured approach to change management, requirement specification, and implementation planning that makes Bakery-generated plans so effective.
+### OpenSpec
+This tool fully integrates with **OpenSpec**, the specification-driven development framework. Bakery generates proper OpenSpec change proposals that follow the official three-stage workflow.
 
 ### Built With
 - [Rust](https://www.rust-lang.org/) - Systems programming language
-- [clap](https://clap.rs/) - Command line argument parsing
+- [clap](https://clap.rs/) - Command line parsing
 - [colored](https://crates.io/crates/colored) - Terminal colors
 - [tokio](https://tokio.rs/) - Async runtime
 - [reqwest](https://docs.rs/reqwest/) - HTTP client
 - [scraper](https://crates.io/crates/scraper) - HTML parsing
-- [serde](https://serde.rs/) - Serialization/deserialization
-- [anyhow](https://docs.rs/anyhow/) - Error handling
+- [indicatif](https://crates.io/crates/indicatif) - Progress indicators
+- [serde](https://serde.rs/) - Serialization
 
 ### Integrations
 - [Azure DevOps](https://dev.azure.com/) - Work item management
-- [OpenSpec](https://openspec.dev/) - Specification-driven development
-- [Claude](https://claude.ai/) - AI-powered plan generation
+- [OpenSpec](https://github.com/Fission-AI/OpenSpec) - Spec-driven development
+- [Claude CLI](https://claude.ai/) - AI-powered plan generation
 
-## 📚 Additional Resources
+## 📚 Resources
 
-- [Azure DevOps REST API Documentation](https://docs.microsoft.com/en-us/rest/api/azure/devops/)
+- [Azure DevOps REST API](https://docs.microsoft.com/en-us/rest/api/azure/devops/)
+- [OpenSpec GitHub](https://github.com/Fission-AI/OpenSpec)
 - [OpenSpec Methodology](https://openspec.dev/)
-- [Claude CLI Documentation](https://claude.ai/cli)
 - [Rust Documentation](https://doc.rust-lang.org/)
 
 ---
 
-**Bakery** - Transform your Azure DevOps work items into comprehensive implementation plans with the power of AI and OpenSpec methodology. 🚀
+**Bakery v0.2.0** - Transform Azure DevOps work items into comprehensive OpenSpec change proposals with AI-powered analysis and automatic validation. 🚀

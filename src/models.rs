@@ -199,6 +199,57 @@ Follow the complete OpenSpec methodology with proper three-stage workflow, direc
 **Acceptance Criteria:**
 {}
 
+IMPORTANT OUTPUT FORMAT:
+Your response should contain ONLY the actual content, NOT markdown formatting examples or instructions.
+
+Your response MUST start with these sections (content only, no code blocks or examples):
+
+## Why
+[1-2 sentences explaining the problem/opportunity]
+
+## What Changes
+- [Bullet list of specific changes]
+- [Mark breaking changes with **BREAKING** if any]
+
+## Impact
+- Affected specs: [list capabilities that will be modified]
+- Affected code: [key files or systems that need changes]
+
+## Tasks
+[OR use ## Implementation - either works]
+## 1. [Category Name]
+- [ ] 1.1 [Specific task description]
+- [ ] 1.2 [Another task]
+- [ ] 1.3 [Another task]
+
+## 2. [Another Category]
+- [ ] 2.1 [Task]
+- [ ] 2.2 [Task]
+
+OPTIONALLY, if this requires new capabilities or modifications to existing ones, include OpenSpec requirement deltas:
+
+## ADDED Requirements
+### Requirement: [Requirement Name]
+[SHALL/MUST statement describing the requirement]
+
+#### Scenario: [Scenario Name]
+- **WHEN** [condition or action]
+- **THEN** [expected behavior]
+
+#### Scenario: [Another Scenario]
+- **WHEN** [condition]
+- **THEN** [behavior]
+
+## MODIFIED Requirements
+[Only if modifying existing requirements - include full updated requirement]
+
+## REMOVED Requirements
+[Only if removing requirements]
+
+DO NOT include markdown code fences, examples, or meta-instructions in your output.
+DO NOT start your response with ```markdown or any code fence.
+Output the actual plan content directly.
+
 ## OpenSpec Implementation Plan Requirements
 
 Create a complete OpenSpec change proposal with these components:

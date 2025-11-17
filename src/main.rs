@@ -32,7 +32,7 @@ use openspec::OpenSpecManager;
 #[derive(Parser)]
 #[command(name = "bakery")]
 #[command(about = "Azure DevOps work item scraper for OpenSpec integration")]
-#[command(version = "0.1.4")]
+#[command(version = "0.2.0")]
 #[command(propagate_version = true)]
 struct Cli {
     #[command(subcommand)]
@@ -65,6 +65,10 @@ struct Cli {
     /// Enable verbose logging
     #[arg(short, long)]
     verbose: bool,
+
+    /// Print machine-readable output and exit (for LLM integration)
+    #[arg(short, long)]
+    print: bool,
 }
 
 #[derive(Parser)]
@@ -141,8 +145,8 @@ async fn main() -> Result<()> {
                 config.get_effective_base_directory().bright_cyan()
             );
         }
-    } else {
-        // Concise output for normal mode
+    } else if !cli.print {
+        // Concise output for normal mode (skip in print mode)
         println!("{} Fetching work item #{}...",
             "🔄".bright_cyan(),
             ticket_id
@@ -181,7 +185,7 @@ async fn main() -> Result<()> {
             "Successfully fetched work item".bright_green(),
             work_item.title.bright_cyan()
         );
-    } else {
+    } else if !cli.print {
         println!("{} {}",
             "✓".bright_green(),
             work_item.title.bright_white()
@@ -201,18 +205,11 @@ async fn main() -> Result<()> {
 
     // Generate OpenSpec plan if requested
     if !cli.no_openspec && config.openspec.auto_generate {
-        if cli.verbose {
-            println!("\n{}",
-                "╔══════════════════════════════════════════════════════════════════════════════╗".bright_magenta()
-            );
-            println!("{} {} {}",
-                "║".bright_magenta(),
-                "🤖 AI-Powered OpenSpec Plan Generation".bright_white().bold(),
-                "║".bright_magenta()
-            );
-            println!("{}",
-                "╚══════════════════════════════════════════════════════════════════════════════╝".bright_magenta()
-            );
+        // Show clean AI generation box
+        if !cli.print {
+            println!("\n┌─────────────────────────────────────────────────────┐");
+            println!("│  {} AI Generating OpenSpec Plan...             │", "🤖".bright_cyan());
+            println!("└─────────────────────────────────────────────────────┘");
         }
 
         // Ensure OpenSpec is initialized
@@ -240,16 +237,52 @@ async fn main() -> Result<()> {
                     &plan_content
                 )?;
 
+                // Extract change ID from path for validation
+                let change_id = plan_path.split('/').last()
+                    .or_else(|| plan_path.split('\\').last())
+                    .unwrap_or("");
+
+                // Validate and show summary
+                openspec_manager.validate_and_summarize(change_id, cli.print)?;
+
                 if cli.verbose {
                     println!("{} {} {}",
                         "📝".bright_green(),
-                        "OpenSpec plan saved to:".bright_white(),
+                        "OpenSpec change created:".bright_white(),
                         plan_path.bright_yellow()
                     );
                 }
 
+                // Show the path to the change
+                if !cli.print {
+                    println!("{} {}",
+                        "📁".bright_cyan(),
+                        plan_path.bright_white()
+                    );
+                }
+
                 // Print summary
-                print_summary(&work_item, &ticket_path, &plan_path, cli.verbose);
+                print_summary(&work_item, &ticket_path, &plan_path, cli.verbose, cli.print);
+
+                // Show next steps
+                if !cli.verbose && !cli.print {
+                    println!("\n{} {}  {} {}",
+                        "Next:".bright_white(),
+                        "openspec list".bright_cyan(),
+                        "or".bright_white(),
+                        "openspec view".bright_cyan()
+                    );
+                }
+
+                // If print mode, output machine-readable summary
+                if cli.print {
+                    println!("\n--- BAKERY OUTPUT ---");
+                    println!("work_item_id: {}", work_item.id);
+                    println!("work_item_title: {}", work_item.title);
+                    println!("ticket_path: {}", ticket_path);
+                    println!("change_path: {}", plan_path);
+                    println!("status: success");
+                }
             }
             Err(_) => {
                 println!("{} Failed to generate OpenSpec plan",
@@ -272,7 +305,7 @@ async fn main() -> Result<()> {
         } else {
             "OpenSpec auto-generation is disabled in config"
         };
-        print_summary(&work_item, &ticket_path, reason, cli.verbose);
+        print_summary(&work_item, &ticket_path, reason, cli.verbose, cli.print);
     }
 
     Ok(())
@@ -329,7 +362,8 @@ fn init_logging(verbose: bool) {
     let filter = if verbose {
         tracing::level_filters::LevelFilter::DEBUG
     } else {
-        tracing::level_filters::LevelFilter::INFO
+        // In non-verbose mode, only show WARN and ERROR
+        tracing::level_filters::LevelFilter::WARN
     };
 
     tracing_subscriber::registry()
@@ -362,7 +396,12 @@ fn get_pat_token(provided_token: Option<String>) -> Result<String> {
     Ok(hardcoded_token.to_string())
 }
 
-fn print_summary(work_item: &models::WorkItem, ticket_path: &str, plan_path_or_reason: &str, verbose: bool) {
+fn print_summary(work_item: &models::WorkItem, ticket_path: &str, plan_path_or_reason: &str, verbose: bool, print_mode: bool) {
+    // Skip summary in print mode
+    if print_mode {
+        return;
+    }
+
     if verbose {
         // Detailed summary for verbose mode
         println!("\n{}",
@@ -443,15 +482,9 @@ fn print_summary(work_item: &models::WorkItem, ticket_path: &str, plan_path_or_r
             "═".repeat(80).bright_magenta()
         );
     } else {
-        // Concise summary for normal mode
-        println!("\n{} Work item #{} saved",
-            "✓".bright_green(),
-            work_item.id
-        );
-
-        // Only show plan path if it's actually a path (not a "skipped" message)
+        // Concise summary for normal mode - just show completion
         if !plan_path_or_reason.contains("skipped") && !plan_path_or_reason.contains("disabled") {
-            println!("{} Plan generated",
+            println!("\n{} Complete",
                 "✓".bright_green()
             );
         }
