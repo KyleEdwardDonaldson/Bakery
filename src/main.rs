@@ -22,17 +22,19 @@ mod config;
 mod filesystem;
 mod models;
 mod openspec;
+mod ui;
 
 // Re-exports for cleaner imports
 use api::AzureDevOpsClient;
 use config::BakeryConfig;
 use filesystem::FileSystemOrganizer;
 use openspec::OpenSpecManager;
+use ui::{Terminal, Theme, OutputMode, Dashboard, Card, Badge, Progress};
 
 #[derive(Parser)]
 #[command(name = "bakery")]
 #[command(about = "Azure DevOps work item scraper for OpenSpec integration")]
-#[command(version = "0.2.1")]
+#[command(version = "0.2.2")]
 #[command(propagate_version = true)]
 struct Cli {
     #[command(subcommand)]
@@ -69,6 +71,18 @@ struct Cli {
     /// Print machine-readable output and exit (for LLM integration)
     #[arg(short, long)]
     print: bool,
+
+    /// Enable rich output mode with maximum visual features
+    #[arg(long)]
+    rich: bool,
+
+    /// Enable compact output mode with minimal information
+    #[arg(long)]
+    compact: bool,
+
+    /// Disable colors in output
+    #[arg(long)]
+    no_color: bool,
 }
 
 #[derive(Parser)]
@@ -84,7 +98,7 @@ async fn main() -> Result<()> {
     // Initialize logging
     init_logging(cli.verbose);
 
-    // Handle subcommands
+    // Handle subcommands early (before loading config for better UX)
     if let Some(command) = cli.command {
         match command {
             Commands::Config => {
@@ -101,6 +115,32 @@ async fn main() -> Result<()> {
 
     // Load configuration
     let mut config = BakeryConfig::load()?;
+
+    // Determine output mode (CLI flags take precedence over config)
+    let output_mode = if cli.print {
+        OutputMode::Print
+    } else if cli.verbose {
+        OutputMode::Verbose
+    } else if cli.rich {
+        OutputMode::Rich
+    } else if cli.compact {
+        OutputMode::Compact
+    } else if cli.no_color {
+        OutputMode::NoColor
+    } else if config.openspec.rich_output {
+        // Use config setting if no CLI flag is provided
+        OutputMode::Rich
+    } else {
+        OutputMode::Default
+    };
+
+    // Initialize UI components
+    let terminal = Terminal::detect();
+    let theme = Theme::new(output_mode, terminal.clone());
+    let dashboard = Dashboard::new(theme.clone(), terminal.clone());
+    let card = Card::new(theme.clone(), terminal.clone());
+    let badge = Badge::new(theme.clone());
+    let progress = Progress::new(theme.clone());
 
     // Override config with CLI parameters if provided
     if let Some(org) = cli.organization {
@@ -120,37 +160,23 @@ async fn main() -> Result<()> {
     let pat_token = get_pat_token(Some(config.azure_devops.pat_token.clone()))?;
 
     if cli.verbose {
-        println!("{} {} {}",
-            "🚀".bright_magenta().bold(),
-            "Starting Bakery".bright_white().bold(),
-            format!("Azure DevOps scraper for ticket #{}", ticket_id).bright_cyan()
-        );
-        println!("{} {} {} {} {}",
-            "📍".bright_blue(),
-            "Organization:".bright_white(),
-            config.azure_devops.organization.bright_green(),
-            "Project:".bright_white(),
-            config.azure_devops.project.bright_green()
+        card.render_header(
+            &format!("🚀 Starting Bakery v{}", env!("CARGO_PKG_VERSION")),
+            &format!("Azure DevOps scraper for ticket #{}", ticket_id)
         );
 
-        // Show storage location info
-        if config.storage.local_baking {
-            println!("📁 {} {}",
-                "Storage:".bright_white(),
-                format!("Local baking enabled - folders will be created in current directory").bright_yellow()
-            );
-        } else {
-            println!("📁 {} {}",
-                "Storage:".bright_white(),
-                config.get_effective_base_directory().bright_cyan()
-            );
-        }
+        card.render_two_column(vec![
+            ("Organization", config.azure_devops.organization.clone()),
+            ("Project", config.azure_devops.project.clone()),
+            ("Storage", if config.storage.local_baking {
+                "Local baking enabled".to_string()
+            } else {
+                config.get_effective_base_directory()
+            }),
+        ]);
     } else if !cli.print {
         // Concise output for normal mode (skip in print mode)
-        println!("{} Fetching work item #{}...",
-            "🔄".bright_cyan(),
-            ticket_id
-        );
+        progress.status("🔄", &format!("Fetching work item #{}...", ticket_id));
     }
 
     // Initialize components
@@ -170,26 +196,31 @@ async fn main() -> Result<()> {
     let work_item = match client.get_work_item(ticket_id).await {
         Ok(item) => item,
         Err(e) => {
-            println!("\n{} {} {}",
-                "❌".bright_red().bold(),
-                "Failed to fetch work item".bright_red(),
-                format!("{}: {}", ticket_id, e).bright_red()
+            dashboard.render_error(
+                "Failed to fetch work item",
+                &format!("Could not retrieve work item #{}: {}", ticket_id, e),
+                Some("Check your network connection, PAT token, and that the work item exists")
             );
             return Err(e);
         }
     };
 
+    // Display work item info
     if cli.verbose {
-        println!("\n{} {} {}",
-            "✅".bright_green().bold(),
-            "Successfully fetched work item".bright_green(),
-            work_item.title.bright_cyan()
+        dashboard.render_work_item_summary(
+            work_item.id,
+            &work_item.title,
+            &work_item.state,
+            &work_item.work_item_type,
+            work_item.attachments.len(),
+            work_item.comments.len(),
+            work_item.images.len(),
+            work_item.acceptance_criteria.len(),
         );
     } else if !cli.print {
-        println!("{} {}",
-            "✓".bright_green(),
-            work_item.title.bright_white()
-        );
+        let status_badge = badge.state(&work_item.state);
+        let type_badge = badge.work_item_type(&work_item.work_item_type);
+        progress.status("✓", &format!("{} {} {}", work_item.title, status_badge, type_badge));
     }
 
     // Save work item to file system
@@ -207,9 +238,12 @@ async fn main() -> Result<()> {
     if !cli.no_openspec && config.openspec.auto_generate {
         // Show clean AI generation box
         if !cli.print {
-            println!("\n┌─────────────────────────────────────────────────────┐");
-            println!("│  {} AI Generating OpenSpec Plan...             │", "🤖".bright_cyan());
-            println!("└─────────────────────────────────────────────────────┘");
+            let ai_text = if theme.use_emojis() {
+                format!("{} AI Generating OpenSpec Plan...", "🤖".bright_cyan())
+            } else {
+                theme.fmt_info("AI Generating OpenSpec Plan...")
+            };
+            card.render_box(&ai_text, 55);
         }
 
         // Ensure OpenSpec is initialized

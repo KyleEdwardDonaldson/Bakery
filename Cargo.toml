@@ -1,6 +1,6 @@
 [package]
 name = "bakery-devops"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 authors = ["Kyle Edward Donaldson <kyle@ked.dev>"]
 description = "Azure DevOps work item scraper with OpenSpec integration"
@@ -34,6 +34,10 @@ rand = "0.8"
 toml = "0.8"
 colored = "2.1"
 indicatif = "0.17"
+crossterm = "0.27"
+tabled = "0.15"
+owo-colors = "4.0"
+unicode-width = "0.1"
 
 [[bin]]
 name = "bakery"

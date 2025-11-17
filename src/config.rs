@@ -73,6 +73,14 @@ pub struct OpenSpecConfig {
     /// Whether to automatically generate OpenSpec plans after scraping
     /// Set to false to disable automatic plan generation
     pub auto_generate: bool,
+    /// Enable rich output mode with maximum visual features by default
+    /// Can be overridden with --rich, --compact, or --no-color flags
+    #[serde(default = "default_rich_output")]
+    pub rich_output: bool,
+}
+
+fn default_rich_output() -> bool {
+    true
 }
 
 impl Default for BakeryConfig {
@@ -97,6 +105,7 @@ impl Default for BakeryConfig {
             openspec: OpenSpecConfig {
                 ai_command_template: "claude -p \"{prompt}\"".to_string(),
                 auto_generate: true,
+                rich_output: true,
             },
         }
     }
